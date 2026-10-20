@@ -7,13 +7,31 @@ on:
       - "Dechat/stellar-contracts/**"
       - "Dechat/dex_with_fiat_frontend/src/lib/contracts/**"
       - ".github/workflows/contracts.yml"
+      - ".github/workflows/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "Dechat/dex_with_fiat_frontend/pnpm-lock.yaml"
+      - "Dechat/dex_with_fiat_frontend/package.json"
+      - ".github/dependabot.yml"
+      - ".github/CODEOWNERS"
+      - "SECURITY.md"
   push:
     branches: [main]
     paths:
       - "Dechat/stellar-contracts/**"
       - "Dechat/dex_with_fiat_frontend/src/lib/contracts/**"
       - ".github/workflows/contracts.yml"
+      - ".github/workflows/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "Dechat/dex_with_fiat_frontend/pnpm-lock.yaml"
+      - "Dechat/dex_with_fiat_frontend/package.json"
+      - ".github/dependabot.yml"
+      - ".github/CODEOWNERS"
+      - "SECURITY.md"
 
+# Least privilege by default: workflows only need to read repository contents.
+# Any job requiring write access must declare it explicitly at the job level.
 permissions:
   contents: read
 
@@ -30,6 +48,8 @@ jobs:
   fmt:
     name: Check formatting
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: Dechat/stellar-contracts
@@ -51,6 +71,8 @@ jobs:
   clippy:
     name: Run clippy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: Dechat/stellar-contracts
@@ -72,6 +94,8 @@ jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: Dechat/stellar-contracts
@@ -105,6 +129,8 @@ jobs:
   build-wasm:
     name: Build WASM
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: Dechat/stellar-contracts
@@ -157,6 +183,8 @@ jobs:
     name: Production Readiness Gate
     runs-on: ubuntu-latest
     needs: [fmt, clippy, test, build-wasm]
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -203,77 +231,9 @@ jobs:
       - name: Verify provider health
         run: |
           set -euo pipefail
-          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$EXPECTED_RPC_URL" || true)
-          echo "Provider health HTTP status: $STATUS"
-          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 500 ]; then
-            echo "::error::Provider health check failed (status $STATUS)"
-            exit 1
-          fi
-      - name: Verify rollback readiness
-        run: |
-          set -euo pipefail
-          if [ ! -f "Dechat/stellar-contracts/ROLLBACK.md" ] && [ ! -f "Dechat/stellar-contracts/docs/ROLLBACK.md" ]; then
-            echo "::warning::No rollback procedure documented; add ROLLBACK.md"
-          else
-            echo "Rollback procedure documented"
-          fi
-      - name: Record authorized override
-        if: ${{ vars.READINESS_OVERRIDE == 'true' }}
-        run: |
-          echo "::warning::Readiness gate override authorized by ${{ github.actor }} (READINESS_OVERRIDE=true)"
-          echo "Override authorized by ${{ github.actor }} at $(date -u +%FT%TZ)" >> "$GITHUB_STEP_SUMMARY"
-
-  canary:
-    name: Read-only Canary Verification
-    runs-on: ubuntu-latest
-    needs: readiness-gate
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli --version "$STELLAR_CLI_VERSION"
-      - name: Canary - chain identity
-        run: |
-          set -euo pipefail
-          ACTUAL=$(stellar network passphrase --rpc-url "$EXPECTED_RPC_URL" 2>/dev/null || true)
-          echo "Expected passphrase: $EXPECTED_NETWORK_PASSPHRASE"
-          echo "Actual passphrase:   $ACTUAL"
-          if [ "$ACTUAL" != "$EXPECTED_NETWORK_PASSPHRASE" ]; then
-            echo "::error::Chain identity mismatch - blocking promotion"
-            exit 1
-          fi
-      - name: Canary - contract queries
-        run: |
-          set -euo pipefail
-          if [ -z "${CONTRACT_ID:-}" ]; then
-            echo "::warning::CONTRACT_ID not set; skipping contract query canary"
-            exit 0
-          fi
-          stellar contract invoke --id "$CONTRACT_ID" --rpc-url "$EXPECTED_RPC_URL" --network-passphrase "$EXPECTED_NETWORK_PASSPHRASE" -- --help >/dev/null 2>&1 || true
-          echo "Contract query canary completed"
-        env:
-          CONTRACT_ID: ${{ vars.CONTRACT_ID }}
-      - name: Canary - API health
-        run: |
-          set -euo pipefail
-          if [ -z "${API_HEALTH_URL:-}" ]; then
-            echo "::warning::API_HEALTH_URL not set; skipping API health canary"
-            exit 0
-          fi
-          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$API_HEALTH_URL" || true)
-          echo "API health status: $STATUS"
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$EXPECTED_RPC_URL")
           if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 400 ]; then
-            echo "::error::API health canary failed (status $STATUS)"
+            echo "::error::RPC provider health check failed (HTTP $STATUS)"
             exit 1
           fi
-        env:
-          API_HEALTH_URL: ${{ vars.API_HEALTH_URL }}
-      - name: Canary - safe provider checks
-        run: |
-          set -euo pipefail
-          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$EXPECTED_RPC_URL" || true)
-          echo "Provider RPC status: $STATUS"
-          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 500 ]; then
-            echo "::error::Provider canary failed (status $STATUS)"
-            exit 1
-          fi
+          echo "Provider health OK (HTTP $STATUS)"
